@@ -1,1 +1,2 @@
 # Predicting-Loan-Status---Data-Transformation-and-Modeling
+We created a statistical model to assist financial institutions in the decision-making process to underwrite customers in the loan approval process. This included a classification threshold (probablity of a customer to pay their loan) to be used to predict loan status and make the most profits. We built a logistic regression model to predict good loans (fully paid off) and bad loans (charged off/defaulted).
