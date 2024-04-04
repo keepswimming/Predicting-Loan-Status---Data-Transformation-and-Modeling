@@ -1,0 +1,686 @@
+---
+title: 'Predicting Loan Defaults with Logistic Regression - Model Accuracy'
+author: "Rita Miller"
+date: "04/03/2024"
+output:
+  pdf_document: default
+  word_document: default
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Load Packages  
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(e1071)
+library(usmap)
+```
+## Load Data
+```{r echo=TRUE}
+dataset <- read.csv("loans50k.csv")
+```
+## Executive Summary
+
+We created a statistical model to assist financial institutions in the decision-making process to underwrite customers in the loan approval process. This included a classification threshold (probablity of a customer to pay their loan) to be used to predict loan status and make the most profits. We built a logistic regression model to predict good loans (fully paid off) and bad loans (charged off/defaulted). As threshold increased, the count of disbursed loans decreased. Also, as threshold increased, profits rose to a point and then decreased. In essence, the stricter a bank is on bad loans, the less profits they would make. Nevertheless, there is a tradeoff between accuracies to predict good versus bad loans. The best profit threshold was 0.72 and the overall accuracy and percentages of correctly predicting good loans was 77% versus 55% for bad loans, based on a total accuracy of 72% (all the calculations and graphs are based on the test data). The results also show that compared to not using our model, a bank could expect to make about $1,299,446 in profits. Alternately, the maximum profits from using our model is projected at $4,120,756. 
+Recommendations: Perform separate models to explore good and bad loans. Review specific variables like employment in an economic downturn. Questions could be more specific to the risk for defaulting on a loan, or adding questions that are specific to the industry of the borrower. 
+Limitations: Predictions were solely based on provided data. Furthermore, this data was analyzed for the sole purpose of increasing profits for financial institutions. We recognize that out analysis may exploit individuals and therefore encourage banks to review the total picture of their clients, before deciding on who to loan money to. 
+
+
+## Introduction 
+The relationships among several fields of data were explored with a goal to predict customers who were likely to default on their loans. We set out to find key predictors which may have a major impact on those loans. We started with a data frame with 50,000 observations, 32 variables with some numeric, others categorical and some with missing values. We then established the inclusion criteria and created a new status to include loans that were fully paid (good loans), charged off and defaulted (bad loans) in our data. Once the inclusion criteria were established, the data was filtered down to 34,655 observations and 31 variables. Some variables like LoanID and employment were excluded, since they appeared to be inapplicable to the goal. The data was further segmented into good and bad loans revealing a total of 27,074 in good status and 7,581 loans in bad status. R programming was used to prepare, clean, explore, and transform the data. Finally, we will create a model and describe its most important features and how it changes the overall profit for the bank. 
+
+## Preparing, Cleaning, Inclusion/Exclusion Criteria
+We kept loans that were fully paid, charged off and defaulted in our data. 
+```{r include=FALSE}
+dataset <- dataset %>% 
+  filter(status %in% c('Charged Off','Fully Paid', 'Default'))
+
+# double check
+dataset$status %>% unique()
+
+#initially there were 50,000 observations
+#check now:
+dim(dataset)
+
+##we need to create a new status
+
+dataset <- dataset %>% 
+  mutate(status_new = if_else(status == 'Fully Paid', 'Good', 'Bad'))
+
+dataset$status_new = factor(dataset$status_new, levels = unique(dataset$status_new)) 
+
+class(dataset$status_new)
+
+```
+We excluded the -loanID variable because it was only an identifier and appeared inapplicable to the goal to predict customers who were more likely to default on their loans.
+
+```{r include=FALSE}
+dataset <- dataset %>% 
+  select(-loanID)
+```
+### Feature engineering and NA values
+```{r message=TRUE, include=FALSE}
+summary(dataset)
+```
+We used feature engineering to consolidate the categories of the variable called "reason" into a single category called "other," because some categories were too sparse. Secondly, we integrated the  "states" to the 5 regions of the U.S., because not all states were labeled.  
+
+```{r message=TRUE, include=FALSE}
+#check for NAs
+any(is.na(dataset))
+```
+NA's occurred in variables "bcOpen," "bcRatio" and "revolRatio," so we replaced those values by the mean. When we disregard cases with any missing variables, we may lose useful information that the non-missing values may convey. Therefore, we may impute reasonable values (those that will not skew the results of analyses very much) for the missing values and that is the reason for replacing Na's with the mean.
+```{r include=FALSE}
+dataset <- dataset %>% 
+  mutate(bcOpen = ifelse(is.na(bcOpen), mean(bcOpen,na.rm = T), bcOpen)) %>% 
+      mutate(bcRatio  = ifelse(is.na(bcRatio), mean(bcRatio,na.rm = T), bcRatio)   )      
+
+any(is.na(dataset))
+```
+## Exploring and Transforming the Data
+Next, we checked the assumptions of the data. The following charts revealed the distributions of some of the quantitative predictor variables to see if they were distributed differently for good and bad loans. 
+```{r echo=FALSE}
+#quantitative predictor variables includes: amount, payment, income, totalPaid, totalBal, totalRevLim, AccOpen24, avgBal, totalLim
+
+#make a side-by-side boxplot of a quantitative variable to see if the variable is distributed differently for good and bad loans (status_new)
+```
+```{r echo=TRUE}
+p1 <- ggplot(dataset, aes(x=status_new, y=amount)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Amount", title = "Loan Status")
+p1
+```
+```{r include=FALSE}
+amount=dataset$amount #verification of skewness
+skewness(amount)#skewness 0.5 to 1 is moderately skewed
+```
+The distribution of amount for good and bad loans were moderately skewed to the right with no apparent outliers. Will replace all  quantitative predictor variables with transformed values using logarithms (log(x+1) to prevent log(0).
+
+```{r include=FALSE}
+dataset$amount=log(dataset$amount+1)#use log(x+1) to prevent log(0)
+head(dataset$amount)
+p1 <- ggplot(dataset, aes(x=status_new, y=amount)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Amount", title = "Loan Status")
+p1 #view skew reduction
+```
+
+```{r echo=FALSE}
+p2 <- ggplot(dataset, aes(x=status_new, y=payment)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Payment", title = "Loan Status")
+p2
+```
+```{r include=FALSE}
+
+payment=dataset$payment #verification of skewness
+skewness(payment) #skewness 0.5 to 1 is moderately skewed
+```
+The distribution of payment for good and bad loans were moderately skewed to the right with some outliers apparent. 
+
+```{r include=FALSE}
+dataset$payment=log(dataset$payment+1)#log(x+1) to prevent log(0)
+head(dataset$payment)
+p2 <- ggplot(dataset, aes(x=status_new, y=payment)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Payment", title = "Loan Status")
+p2 #view skew reduction
+```
+
+```{r echo=FALSE}
+p3 <- ggplot(dataset, aes(x=status_new, y=income)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Income", title = "Loan Status")
+p3
+```
+```{r include=FALSE}
+income=dataset$income #verification of skewness
+skewness(income)#skewness less than -1 or greater than 1 are highly skewed
+```
+
+The distribution of income for good and bad loans were strongly skewed to the right with outliers. 
+
+```{r include=FALSE}
+dataset$income=log(dataset$income+1)
+head(dataset$income)
+p3 <- ggplot(dataset, aes(x=status_new, y=income)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Income", title = "Loan Status")
+p3#view skew reduction
+
+```
+
+```{r include=FALSE}
+p4 <- ggplot(dataset, aes(x=status_new, y=totalBal)) + 
+  geom_boxplot()+labs(x = "",
+                      y="TotalBal", title = "Loan Status")
+p4
+```
+```{r include=FALSE}
+totalBal=dataset$totalBal #verification of skewness
+skewness(totalBal)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of totalBal for good and bad loans were strongly skewed to the right with outliers.
+```
+ 
+```{r include=FALSE}
+dataset$totalBal=log(dataset$totalBal+1)#log(x+1) to prevent log(0)
+head(dataset$totalBal)
+p4 <- ggplot(dataset, aes(x=status_new, y=totalBal)) + 
+  geom_boxplot()+labs(x = "",
+                      y="TotalBal", title = "Loan Status")
+p4 #view skew reduction
+```
+
+```{r include=FALSE}
+p5 <- ggplot(dataset, aes(x=status_new, y=avgBal)) + 
+  geom_boxplot()+labs(x = "",
+                      y="avgBal", title = "Loan Status")
+p5
+```
+```{r include=FALSE}
+avgBal=dataset$avgBal #verification of skewness
+skewness(avgBal)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of avBal for good and bad loans were strongly skewed to the right with outliers.
+```
+ 
+```{r include=FALSE}
+dataset$avgBal=log(dataset$avgBal+1)#log(x+1) to prevent log(0) 
+head(dataset$avgBal)
+p5 <- ggplot(dataset, aes(x=status_new, y=avgBal)) + 
+  geom_boxplot()+labs(x = "",
+                      y="avgBal", title = "Loan Status")
+p5 #view skew reduction
+```
+
+```{r include=FALSE}
+p6 <- ggplot(dataset, aes(x=status_new, y=totalLim)) + 
+  geom_boxplot()+labs(x = "",
+                      y="totalLim", title = "Loan Status")
+p6 
+```
+```{r include=FALSE}
+totalLim=dataset$totalLim #verification of skewness
+skewness(totalLim)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of totalLim for good and bad loans were strongly skewed to the right with outliers.
+```
+ 
+```{r include=FALSE}
+dataset$totalLim=log(dataset$totalLim+1)#log(x+1) to prevent log(0)
+head(dataset$totalLim)
+p6 <- ggplot(dataset, aes(x=status_new, y=totalLim)) + 
+  geom_boxplot()+labs(x = "",
+                      y="totalLim", title = "Loan Status")
+p6 #view skew reduction
+```
+```{r include=FALSE}
+p7 <- ggplot(dataset, aes(x=status_new, y=debtIncRat)) + 
+  geom_boxplot()+labs(x = "",
+                      y="debtIncRat", title = "Loan Status")
+p7
+```
+```{r include=FALSE}
+debtIncRat=dataset$debtIncRat #verification of skewness
+skewness(debtIncRat)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of debtIncRat for good and bad loans were strongly skewed to the left with outliers. 
+
+```
+
+```{r include=FALSE}
+dataset$debtIncRat=log(dataset$debtIncRat+1)#log(x+1) to prevent log(0)
+head(dataset$debtIncRat)
+p7 <- ggplot(dataset, aes(x=status_new, y=debtIncRat)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Debt Income Ratio", title = "Loan Status")
+p7 #view skew reduction
+```
+```{r include=FALSE}
+p8 <- ggplot(dataset, aes(x=status_new, y=openAcc)) + 
+  geom_boxplot()+labs(x = "",
+                      y="open Account(s)", title = "Loan Status")
+p8 
+```
+```{r include=FALSE}
+openAcc=dataset$openAcc #verification of skewness
+skewness(openAcc)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of openAcc for good and bad loans were moderately skewed to the left with outliers.
+```
+ 
+```{r include=FALSE}
+dataset$openAcc=log(dataset$openAcc+1)#log(x+1) to prevent log(0)
+head(dataset$openAcc)
+p8 <- ggplot(dataset, aes(x=status_new, y=openAcc)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Open Accounts", title = "Loan Status")
+p8 #view skew reduction
+```
+```{r include=FALSE}
+p9 <- ggplot(dataset, aes(x=status_new, y=totalAcc)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Total Account(s)", title = "Loan Status")
+p9 
+```
+```{r include=FALSE}
+totalAcc=dataset$totalAcc #verification of skewness
+skewness(totalAcc)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of totalAcc for good and bad loans were strongly skewed to the right with outliers.
+```
+
+```{r include=FALSE}
+dataset$totalAcc=log(dataset$totalAcc+1)#log(x+1) to prevent log(0)
+head(dataset$totalAcc)
+p9 <- ggplot(dataset, aes(x=status_new, y=totalAcc)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Total Accounts", title = "Loan Status")
+p9 #view skew reduction
+```
+```{r include=FALSE}
+p10 <- ggplot(dataset, aes(x=status_new, y=totalPaid)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Total Paid", title = "Loan Status")
+p10
+```
+```{r include=FALSE}
+totalPaid=dataset$totalPaid #verification of skewness
+skewness(totalPaid)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of totalPaid for good and bad loans were strongly skewed to the left with outliers.
+```
+```{r include=FALSE}
+dataset$totalPaid=log(dataset$totalPaid+1)#log(x+1) to prevent log(0)
+head(dataset$totalPaid)
+p10 <- ggplot(dataset, aes(x=status_new, y=totalPaid)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Total Paid", title = "Loan Status")
+p10 #view skew reduction
+```
+```{r include=FALSE}
+p11 <- ggplot(dataset, aes(x=status_new, y=accOpen24)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Account Open 24 Months", title = "Loan Status")
+p11 
+```
+```{r include=FALSE}
+accOpen24=dataset$accOpen24 #verification of skewness
+skewness(accOpen24)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of totalPaid for good and bad loans were strongly skewed to the right with outliers.
+```
+
+```{r include=FALSE}
+dataset$accOpen24=log(dataset$accOpen24+1)#log(x+1) to prevent log(0)
+head(dataset$accOpen24)
+p11 <- ggplot(dataset, aes(x=status_new, y=accOpen24)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Account Open 24 Months", title = "Loan Status")
+p11 #view skew reduction
+```
+
+```{r include=FALSE}
+p12 <- ggplot(dataset, aes(x=status_new, y=totalRevBal)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Total Revolving Balance", title = "Loan Status")
+p12 
+```
+```{r include=FALSE}
+totalRevBal=dataset$totalRevBal #verification of skewness
+skewness(totalRevBal)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of totalPaid for good and bad loans were strongly skewed to the right with outliers.
+```
+
+```{r include=FALSE}
+dataset$totalRevBal=log(dataset$totalRevBal+1)#log(x+1) to prevent log(0)
+head(dataset$totalRevBal)
+p12 <- ggplot(dataset, aes(x=status_new, y=totalRevBal)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Total Revolving Balance", title = "Loan Status")
+p12 #view skew reduction
+```
+```{r include=FALSE}
+p13 <- ggplot(dataset, aes(x=status_new, y=totalRevLim)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Total Revolving Limit", title = "Loan Status")
+p13 
+```
+```{r include=FALSE}
+totalRevLim=dataset$totalRevLim #verification of skewness
+skewness(totalRevLim)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of total Revolving Limit for good and bad loans were strongly skewed to the right with outliers.
+```
+
+```{r include=FALSE}
+dataset$totalRevLim=log(dataset$totalRevLim+1)#log(x+1) to prevent log(0)
+head(dataset$totalRevLim)
+p13 <- ggplot(dataset, aes(x=status_new, y=totalRevLim)) + 
+  geom_boxplot()+labs(x = "",
+                      y="Total Revolving Limit", title = "Loan Status")
+p13 #view skew reduction
+```
+```{r include=FALSE}
+p14 <- ggplot(dataset, aes(x=status_new, y=bcOpen)) + 
+  geom_boxplot()+labs(x = "",
+                      y="bcOpen", title = "Loan Status")
+p14 
+```
+```{r include=FALSE}
+bcOpen=dataset$bcOpen #verification of skewness
+skewness(bcOpen)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of bcOpen for good and bad loans were strongly skewed to the right with outliers.
+```
+```{r include=FALSE}
+dataset$bcOpen=log(dataset$bcOpen+1)#log(x+1) to prevent log(0)
+head(dataset$bcOpen)
+p14 <- ggplot(dataset, aes(x=status_new, y=bcOpen)) + 
+  geom_boxplot()+labs(x = "",
+                      y="bcOpen", title = "Loan Status")
+p14 #view skew reduction
+```
+```{r include=FALSE}
+p15 <- ggplot(dataset, aes(x=status_new, y=bcRatio)) + 
+  geom_boxplot()+labs(x = "",
+                      y="bcRatio", title = "Loan Status")
+p15 
+```
+```{r include=FALSE}
+bcRatio=dataset$bcRatio #verification of skewness
+skewness(bcRatio)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of bcRatio for good and bad loans were moderately skewed to the left with outliers.
+
+```
+
+```{r include=FALSE}
+dataset$bcRatio=log(dataset$bcRatio+1)#log(x+1) to prevent log(0)
+head(dataset$bcRatio)
+p15 <- ggplot(dataset, aes(x=status_new, y=bcRatio)) + 
+  geom_boxplot()+labs(x = "",
+                      y="bcRatio", title = "Loan Status")
+p15 #view skew reduction
+```
+
+```{r include=FALSE}
+p16 <- ggplot(dataset, aes(x=status_new, y=totalIlLim)) + 
+  geom_boxplot()+labs(x = "",
+                      y="totalIlLim", title = "Loan Status")
+p16 
+```
+```{r include=FALSE}
+bcRatio=dataset$bcRatio #verification of skewness
+skewness(bcRatio)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of bcRatio for good and bad loans were strongly skewed to the left with outliers.
+```
+```{r include=FALSE}
+dataset$totalIlLim=log(dataset$totalIlLim+1)#log(x+1) to prevent log(0)
+head(dataset$totalIlLim)
+p16 <- ggplot(dataset, aes(x=status_new, y=totalIlLim)) + 
+  geom_boxplot()+labs(x = "",
+                      y="totalIlLim", title = "Loan Status")
+p16 #view skew reduction
+```
+```{r include=FALSE}
+p17 <- ggplot(dataset, aes(x=status_new, y=totalIlLim)) + 
+  geom_boxplot()+labs(x = "",
+                      y="totalIlLim", title = "Loan Status")
+p17 
+```
+```{r include=FALSE}
+totalIlLim=dataset$totalIlLim #verification of skewness
+skewness(totalIlLim)#skewness less than -1 or greater than 1 are highly skewed
+#The distribution of bcRatio for good and bad loans were strongly skewed to the left with outliers.
+```
+
+```{r include=FALSE}
+dataset$totalIlLim=log(dataset$totalIlLim+1)#log(x+1) to prevent log(0)
+head(dataset$totalIlLim)
+p17 <- ggplot(dataset, aes(x=status_new, y=totalIlLim)) + 
+  geom_boxplot()+labs(x = "",
+                      y="totalIlLim", title = "Loan Status")
+p17 #view skew reduction
+```
+
+```{r echo=FALSE}
+#use bar graphs or tables to show how the category distribution varies for good and bad loans (status_new)
+
+#qualitative predictor variables: term, length, home, grade, verified, status, reason, state
+
+# Grouped Bar Plot/double bar graph
+catV <- table(dataset$status_new, dataset$term) 
+barplot(catV, main="Loans Status", 
+  xlab="Term", ylab = "Frequency",col=c("red","green"),
+  legend = rownames(catV), beside=TRUE,args.legend = list(title = "Status"))
+
+```
+
+The distribution of the term for the majority of loans were in good status at 36 months.  
+
+```{r echo=FALSE}
+catV <- table(dataset$status_new, dataset$length)  
+barplot(catV, main="Loan Status",
+  xlab="Length", ylab = "Frequency",col=c("red","green"),
+  legend = rownames(catV), beside=TRUE,args.legend = list(title = "Status"))
+```
+
+The distribution of the length of loans were approximately 2 years and the majority appeared to be in good status. 
+
+```{r echo=FALSE}
+catV <- table(dataset$status_new, dataset$home) 
+barplot(catV, main="Loan Status",
+  xlab="Home", ylab = "Frequency",col=c("red","green"),
+  legend = rownames(catV), beside=TRUE,args.legend = list(title = "Status"))
+```
+
+The distribution of home loans were mostly for mortgages and the majority appeared to be in good status. 
+
+```{r echo=FALSE}
+catV <- table(dataset$status_new, dataset$grade) 
+barplot(catV, main="Loan Status",
+  xlab="Grade", ylab = "Frequency",col=c("red","green"),
+  legend = rownames(catV), beside=TRUE,args.legend = list(title = "Status"))
+```
+
+The distribution for the grade of most loans was a B and the majority appeared to be in good status. 
+
+```{r echo=FALSE}
+dataset$verified <- as.character(dataset$verified)
+
+catV <- table(dataset$status_new, dataset$verified) 
+barplot(catV, main="Loan Status",
+  xlab="Verified", ylab = "Frequency",col=c("red","green"),
+  legend = rownames(catV), beside=TRUE,args.legend = list(title = "Status"))
+
+```
+
+The distribution of verified for most loans was Source Verified and the majority appeared to be in good status. 
+
+```{r echo=FALSE}
+catV <- table(dataset$status_new, dataset$status) 
+barplot(catV, main="Loan Status",
+  xlab="Status", ylab = "Frequency",col=c("red","green"),
+  legend = rownames(catV), beside=TRUE, args.legend = list(title = "Standing"))
+```
+
+The distribution of the status of loans were fully paid and the majority appeared to be in good standing. 
+
+```{r include=FALSE}
+dataset$reason <- as.character(dataset$reason)#closer look
+table(dataset$reason)
+
+
+x <-c("wedding","small_business","vacation","renewable_energy","medical","major_purchase","house","car","moving")
+
+dataset$reason <- ifelse(dataset$reason %in% x, "other", dataset$reason)
+
+
+catV <- table(dataset$status_new, dataset$reason) 
+barplot(catV, main="Loan Status",
+  xlab="Reason", ylab = "Frequency",col=c("red","green"),
+  legend = rownames(catV), beside=TRUE, args.legend = list(title = "Status"))
+#The distribution of the reason for loans seems to be mostly for debt consolidation and the majority of loans appeared to be in good status.
+```
+
+```{r echo=FALSE}
+
+NCR <-c(.north_central_region)
+SR <- c(.south_region)
+WR <- c(.west_region)
+NER <- c(.northeast_region)
+WNC <- c(.west_north_central)
+
+dataset$Region<- ifelse (dataset$state %in% NCR, "NCR","Other")
+dataset$Region<-ifelse (dataset$state %in% SR, "SR", dataset$Region)
+
+dataset$Region<- ifelse (dataset$state %in% WR, "WR",dataset$Region)
+dataset$Region<-ifelse (dataset$state %in% NER, "NER", dataset$Region)
+
+
+dataset$Region<- ifelse (dataset$state %in% WNC, "WNC",dataset$Region)
+#dataset$Region<-ifelse (dataset$state %in% SR, "SR", "Other")
+#table(dataset$Region)
+catV <- table(dataset$status_new, dataset$Region) 
+barplot(catV, main="Loan Status",
+  xlab="Regions", ylab = "Frequency",col=c("red","green"),
+  legend = rownames(catV), beside=TRUE, args.legend = list(title = "Status"))
+```
+
+The largest distribution of loans by region were located in the Southern Region of the U.S. and majority loans appears in good standing.
+
+## The Logistic model
+
+```{r include=FALSE}
+orig_dataset <- dataset
+dataset$state <- NULL
+dataset$status <- NULL
+
+table(dataset$status_new)#Create two datasets from your cleaned and prepared data 
+dataset$Region <- as.factor(dataset$Region)
+dataset$verified<- as.factor(dataset$verified)
+dataset$reason <- as.factor(dataset$reason)
+dataset$totalPaid <- NULL #don't use totalPaid as a predictor
+dataset$status_new <- as.numeric(dataset$status_new)
+dataset$status_new <- ifelse(dataset$status_new ==1,0,1)
+dataset$employment <- NULL
+str(dataset)
+
+set.seed(1234)#Randomly choose 80% of the cases and make this into a “training” dataset that will be used to build your logistic regression models
+ind<- sample(2,nrow(dataset),replace = TRUE, prob=c(0.8,0.2))
+
+train.data <- dataset[ind==1,]
+test.data <- dataset[ind==2,]
+str(train.data)
+```
+```{r echo=TRUE}
+
+model <- glm(status_new~.,data = train.data, family = binomial(link = "logit"))
+summary(model)
+
+prediction <- predict(model, test.data, type = "response")#generate predicted statuses for each loan and analyze the performance (accuracy) of your model
+```
+```{r include=FALSE}
+
+threshold <- c(0.50,0.52,0.54,0.56,0.58,0.60,0.62,0.64,0.66,0.68,0.70,0.72,0.74,0.76,0.78,0.80,0.82,0.84,0.86,0.88,0.90)
+```
+```{r echo=TRUE}
+i <- 1
+pred_all <- c()
+total_acc <- c()
+total_acc_badloans <- c()
+total_accgoodloans<- c()
+for (i in 1:length(threshold)){
+  print(i)
+  pred_test <-ifelse(prediction > threshold[i],1,0)
+  x<- as.matrix(table(pred_test, test.data$status_new))
+  
+  total <- x[3][1] + x[4][1]+x[2][1]+x[1][1]
+  
+  total_acc_temp = (x[1][1]+x[4][1])/total
+  total_acc_badloans_temp =x[1][1]/(x[1][1]+x[2][1])
+  total_accgoodloans_temp= x[4][1]/(x[4][1]+x[3][1])
+  total_acc[i] <- total_acc_temp
+  total_acc_badloans[i] <- total_acc_badloans_temp
+  total_accgoodloans[i] <- total_accgoodloans_temp
+  
+  pred_all[[i]] <- pred_test
+  
+  
+}
+
+accuracy <-as.data.frame(cbind(threshold,total_acc,total_acc_badloans,total_accgoodloans))
+colnames(accuracy)<- c("threshold","total_acc","total_acc_badloans","total_acc_goodloans")
+
+orig_dataset$totalPaid <- expm1(orig_dataset$totalPaid)
+orig_dataset$amount <-expm1(orig_dataset$amount)
+
+length(pred_all)
+profit <- c()
+disbursed_loans <- c()
+for (i in 1:length(pred_all)){
+  #i <-1
+  test2 <-orig_dataset[ind==2,]
+  
+  test2$threshold<- pred_all[[i]]
+  test2$profit <- test2$totalPaid - test2$amount 
+  proft_temp <- test2[test2$threshold == 1,]#calculating on customers whose prob is greater than threshold
+  l <- nrow(proft_temp)
+  p <- sum(proft_temp$profit, na.rm= TRUE)
+  profit[i] <- p
+  disbursed_loans[i] <- l
+  
+}
+
+accuracy$profit <- profit
+accuracy$disbursed_loans <-disbursed_loans
+
+```
+
+```{r echo=TRUE}
+
+par(mfrow = c(1,2))
+###over_all accuracy
+plot(accuracy$threshold,accuracy$total_acc, main= "Overall_Accuracy", xlab = "threshold",ylab="total_acc")
+lines(accuracy$threshold,accuracy$total_acc)
+###accuracy of  predicting bad loans is increasing
+
+plot(accuracy$threshold,accuracy$total_acc_badloans, main= "BadLoans Accuracy", xlab = "threshold",ylab="total_acc")
+lines(accuracy$threshold,accuracy$total_acc_badloans, col="red")
+
+```
+```{r include=FALSE}
+###profit before model
+orig_dataset$profit <- orig_dataset$totalPaid - orig_dataset$amount
+sum(orig_dataset$profit,na.rm = TRUE)
+test2 <-orig_dataset[ind==2,]
+sum(test2$profit)
+
+###profit after models
+accuracy$profit
+```
+## Optimizing Threshold for Accuracy 
+
+We created two sets of data from the original dataset (training data & test data). The training dataframe (DF) contained 80% of the original sample, while the testing DF contained 20% to generate our model to predict statuses for each loan and analyze the performance (accuracy) of our model.
+
+The dataset is not balanced since there are more good (27074) loans than bad (7581) loans. We then fit the model using our predictors on the training data in order to predict loan status. For the analysis, we oversampled to increase the number of bad loans to match the number of good loans, while keeping the original row number of bad loans in the training data. This led to a final training dataset of 27,747 total rows (6,058 bad loans and 21,689 good loans). 
+
+Predicting bad loans was the goal and that's what we did. At this point, we could move to automatic model selection to check for problems of collinearity using the variance inflation factor (VIF) on our full model. However, we suspect that some of the variables might produce a high VIF, but in this project, we are uninterested in whether the estimated regression coefficient increases if our predictors are correlated. Instead, we focused on loan status prediction - predicting customers who were likely to default on their loans. The results revealed that as threshold increased, the overall accuracy decreased. On the other hand, as threshold increased, the accuracy to predict bad loans increased. 
+
+## Optimizing Threshold for Profit
+
+The best profit threshold was 0.72 and the overall accuracy and percentages of correctly predicting good loans was 77% for good loans and 55% for bad loans, based on an accuracy of 72% (all the calculations and graphs are based on the test data). 
+ 
+As threshold increases (90%), total accuracy would only be 42%, the accuracy of predicting the total amount of bad loans would also increase (92%), and we see an inverse proportion in total accuracy of good loans as they would decrease (27%). However, the bank could make less of a profit (143,7690) and disburse fewer loans than it would at a lower threshold. The maximum profit threshold did not coincide with the maximum accuracy threshold. In other words, as the maximum accuracy threshold increased, for instance (0.90), profits decreased.
+Compared to not using our model, a bank could expect to make $1,299,446 in profits. Alternately, the maximum profits from using  our model is projected at $4,120,756. 
+
+```{r echo=FALSE}
+par(mfrow = c(1,2))
+plot(accuracy$threshold,accuracy$disbursed_loans, main= "Disbursed Loans", xlab = "threshold",ylab="Count")
+lines(accuracy$threshold,accuracy$disbursed_loans, col="red")
+###as we are able to predict bad loans better our profit is getting increased
+plot(accuracy$threshold,accuracy$profit, main= "Profit",xlab= "threshold", ylab= "profit")
+lines(accuracy$threshold,accuracy$profit,col="green")
+```
+
+## Results Summary
+
+We created a statistical model to assist financial institutions in the decision making model to underwrite customers in the loan approval process. This included a classification threshold (probablity of a customer to pay their loan) to be used to predict loan status and make the most profits for a bank. We built a logistic regression model to predict good loans (fully paid off) and bad loans (charged off/defaulted). We also found a feasible classification threshold to be used to make the most profits for the bank. The model revealed the best or highest threshold for profits at 0.72. It predicted good loans with an accuracy of 77% and bad loans with an accuracy of 55%. The overall accuracy of the model was 72%. 
+
+Nonetheless, there is a tradeoff between accuracies to predict good and bad loans. If we increase the threshold value, we would be able to predict a higher percentage of bad loans, but would inversing predict a lower percentage of good loans/low risk loans. Ultimately, the bank would make less profits and disburse fewer loans. It all depends on whether a bank wants to be risk averse or risky with the potential to make more profits.    
+
+
+
+
